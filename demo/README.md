@@ -86,8 +86,6 @@ The demo includes proper timeouts for Spark initialization:
 - Network latency to MinIO
 - System resources
 
-See [UPDATES.md](../UPDATES.md) for detailed fix documentation.
-
 ## 📋 Demo Flow
 
 ### Phase 1: Environment Teardown

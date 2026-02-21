@@ -50,8 +50,8 @@ POST   /api/cows              // Create cow
 PUT    /api/cows/:id/breed    // Update breed
 DELETE /api/cows/:id          // Deactivate cow
 
-// Analytics (SQL Server projection, <100ms)
-GET    /api/v1/analytics/herd-composition  // Herd analytics (21-76ms)
+// Analytics (DuckDB queries Gold Delta, 10-50ms)
+GET    /api/v1/analytics/herd-composition  // Herd analytics (10-50ms)
 GET    /api/v1/analytics/cow/:id           // Lifecycle analytics
 
 // Sync

@@ -7,9 +7,9 @@ A production-ready cattle management platform implementing **Pure Projection Pat
 This platform demonstrates a modern event-sourced architecture with medallion data layers:
 
 ```
-Write Path:  API → SQL Server Events → Bronze (Delta Lake) → Silver (Delta Lake) → Gold (Delta Lake) → SQL Server analytics.*
+Write Path:  API → SQL Server Events → Bronze (Delta Lake) → Silver (Delta Lake) → Gold (Delta Lake)
 Read Path:   API ← SQL Server (operational.cows)
-             API ← SQL Server (analytics.* schema - projected from Gold)
+             API ← DuckDB → Gold Delta Lake (direct queries, 10-50ms)
 ```
 
 ### Architectural Pattern: Pure Projection Pattern A
@@ -20,7 +20,8 @@ Read Path:   API ← SQL Server (operational.cows)
 - **Bronze Layer**: Raw event storage in Delta Lake (MinIO S3)
 - **Silver Layer**: Cleaned state with history (SCD Type 2) + data quality expectations
 - **SQL Projection**: Query-optimized view in SQL Server (operational.cows)
-- **Gold Layer**: Pre-computed analytics and aggregations (Delta Lake) → projected to SQL Server analytics schema for fast API queries
+- **Gold Layer**: Pre-computed analytics and aggregations (Delta Lake)
+- **DuckDB Analytics**: Direct queries to Gold Delta tables (10-50ms, mirrors Databricks SQL pattern)
 
 ### Key Benefits
 
@@ -212,20 +213,20 @@ See [`backend/jobs/SYNC_JOB_DOCUMENTATION.md`](backend/jobs/SYNC_JOB_DOCUMENTATI
 
 ## 📈 Analytics API
 
-Pre-computed analytics from Gold layer Delta tables, projected to SQL Server for fast queries:
+Pre-computed analytics from Gold layer Delta tables, queried directly via DuckDB:
 
 ```bash
 # Herd composition
 curl http://localhost:8000/api/v1/analytics/herd-composition \
   -H "X-Tenant-ID: 550e8400-e29b-41d4-a716-446655440000" | jq
 
-# Returns (in 21-76ms, uncached):
+# Returns (in 10-50ms):
 # {
-#   "as_of": "2026-01-28T06:09:05.669752",
+#   "as_of": "2026-02-21T06:09:05.669752",
 #   "cached": false,
 #   "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
 #   "data": {
-#     "snapshot_date": "2026-01-28",
+#     "snapshot_date": "2026-02-21",
 #     "total_cows": 7,
 #     "by_breed": [{"dimension": "Holstein", "count": 2, "percentage": 28.0}, ...],
 #     "by_status": [{"dimension": "active", "count": 5, "percentage": 71.0}, ...],
@@ -235,26 +236,27 @@ curl http://localhost:8000/api/v1/analytics/herd-composition \
 ```
 
 **Features:**
-- ✅ Fast SQL queries to analytics.* schema (21-76ms uncached, 3-39ms cached)
+- ✅ Direct Gold Delta queries via DuckDB (10-50ms response time)
 - ✅ 5-second in-memory cache for ultra-fast responses
-- ✅ Gold Delta Lake as canonical source of truth
-- ✅ Disposable SQL projection (can rebuild from Gold)
-- ✅ 99% faster than previous Spark-based approach
-- ✅ 95% less memory usage (84MB vs 500MB-2GB)
+- ✅ Zero sync lag (queries canonical source directly)
+- ✅ No projection overhead (eliminates SQL sync step)
+- ✅ Mirrors Databricks SQL serverless warehouses pattern
+- ✅ Gold Delta Lake remains single source of truth
 - ✅ Tenant isolation
 
 **Architecture:**
 ```
-Gold Delta Lake (truth) → SQL Server analytics.* (projection) → FastAPI (SQLAlchemy) → Response
-     ↑                            ↓
-  Authoritative              Disposable Cache
+Gold Delta Lake (canonical truth) → DuckDB (delta_scan) → FastAPI → Response
+                                          ↓
+                                    Direct queries (10-50ms)
 ```
 
 ## 🏗️ Technology Stack
 
 ### Data Layer
-- **SQL Server 2022**: Transactional database (events, SQL projection, analytics projection)
+- **SQL Server 2022**: Transactional database (events, operational projection)
 - **Delta Lake**: Lakehouse storage (Bronze, Silver, Gold)
+- **DuckDB**: Analytics engine (direct Gold Delta queries with delta_scan)
 - **PySpark**: Data processing engine (Bronze/Silver/Gold transformations)
 - **MinIO**: S3-compatible object storage (local dev)
 
@@ -302,7 +304,7 @@ The script will automatically:
 
 **Option 2: Manual Setup**
 
-See [SETUP.md](SETUP.md) for detailed manual setup instructions.
+See [docs/DEVELOPER.md](docs/DEVELOPER.md) for detailed setup and development instructions.
 
 ### Validation
 
@@ -340,8 +342,6 @@ Verify your setup is correct:
    cd backend
    # Create your FastAPI app here
    ```
-
-For detailed setup instructions, see [SETUP.md](SETUP.md).
 
 ## Data Flow
 
@@ -404,15 +404,11 @@ pytest tests/ --cov=. --cov-report=html
 ### 🏠 Project Overview
 - [`README.md`](README.md) - This file (project overview)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) - Architecture deep dive and design decisions
-- [`TECHNICAL_NOTES.md`](TECHNICAL_NOTES.md) - Technical implementation details
-- [`UPDATES.md`](UPDATES.md) - Bug fixes and improvements history
+- [`demo/DATABRICKS_MIGRATION.md`](demo/DATABRICKS_MIGRATION.md) - Cloud deployment guide (AWS/Azure/GCP)
 
 ### 🎬 Demo & Getting Started
-- [`demo/README.md`](demo/README.md) - Interactive demo guide (600+ lines)
+- [`demo/README.md`](demo/README.md) - Interactive demo guide
 - [`demo/CHEATSHEET.sh`](demo/CHEATSHEET.sh) - Command cheat sheet
-- [`demo/SAMPLE_OUTPUT.md`](demo/SAMPLE_OUTPUT.md) - Expected demo output
-- [`SETUP.md`](SETUP.md) - Detailed setup instructions
-- [`COMMANDS.md`](COMMANDS.md) - Command reference guide
 
 ### 🏗️ Databricks / Lakehouse Layers
 - [`databricks/README.md`](databricks/README.md) - Databricks overview & Bronze quickstart
@@ -428,10 +424,6 @@ pytest tests/ --cov=. --cov-report=html
 - [`backend/monitoring/QUICKREF.md`](backend/monitoring/QUICKREF.md) - Monitoring quick reference
 - [`docs/README.md`](docs/README.md) - Documentation index
 
-### 🛠️ Setup & Troubleshooting
-- [`VENV_USAGE.md`](VENV_USAGE.md) - Virtual environment guide
-- [`WSL-TROUBLESHOOTING.md`](WSL-TROUBLESHOOTING.md) - WSL setup and troubleshooting
-
 ### 🌐 API Documentation
 - Interactive docs: `http://localhost:8000/docs` (Swagger UI)
 - ReDoc: `http://localhost:8000/redoc`
@@ -443,7 +435,8 @@ pytest tests/ --cov=. --cov-report=html
 |------|-------|---------|
 | `backend/api/main.py` | 327 | FastAPI application, health endpoints |
 | `backend/api/routers/cows.py` | 400+ | Cow CRUD endpoints (Event Sourcing) |
-| `backend/api/routers/analytics.py` | 400 | Analytics endpoints (SQL queries to analytics schema) |
+| `backend/api/routers/analytics.py` | 685 | Analytics endpoints (DuckDB queries to Gold Delta) |
+| `backend/database/duckdb_analytics.py` | 418 | DuckDB repository for Gold Delta queries |
 
 ### Sync Jobs
 | File | Lines | Purpose |
@@ -544,15 +537,13 @@ print(f'Bronze records: {df.count()}')
 "
 ```
 
-## ⚙️ Configuration & Known Issues
+## ⚙️ Configuration
 
 ### Spark Timeouts
-**Critical:** Increased timeouts to prevent initialization failures:
+**Note:** Timeouts configured for Spark initialization:
 - Bronze layer: **180 seconds** (Spark init + JAR downloads)
 - Silver layer: **180 seconds** (SCD Type 2 processing)
 - Gold layer: **240 seconds** (complex aggregations)
-
-See [UPDATES.md](UPDATES.md) for detailed fix documentation.
 
 ### UUID Consistency
 **Important:** UUIDs normalized to lowercase across all layers:
@@ -564,8 +555,6 @@ See [UPDATES.md](UPDATES.md) for detailed fix documentation.
 **Resolved:** Silver table pre-created during setup to prevent `ProtocolChangedException`
 - Run `databricks/silver/setup_silver.py` before any concurrent writes
 - Demo script now includes this step automatically
-
-For complete bug fix history and troubleshooting, see **[UPDATES.md](UPDATES.md)**
 
 ## 🌟 Features Showcase
 
@@ -582,9 +571,9 @@ PUT /api/v1/cows/{id} → Creates cow_updated event
 # Write side: Commands create events
 POST /api/v1/cows → events.cow_events
 
-# Read side: Queries use projection
-GET /api/v1/cows → operational.cows (SQL Server)
-GET /api/v1/analytics/* → analytics.* schema (SQL Server, projected from Gold Delta)
+# Read side: Queries use optimized stores
+GET /api/v1/cows → operational.cows (SQL Server projection)
+GET /api/v1/analytics/* → DuckDB → Gold Delta Lake (direct queries)
 ```
 
 ### Eventual Consistency

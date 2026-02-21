@@ -245,16 +245,16 @@ curl -X DELETE "http://localhost:8000/api/cows/550e8400-e29b-41d4-a716-446655440
 
 ### Analytics API
 
-**Architecture:** FastAPI queries SQL Server analytics schema (projected from Gold Delta Lake)  
-**Performance:** 21-76ms (uncached), 3-39ms (cached)  
-**Update Frequency:** Every 10 seconds via sync-analytics.sh  
-**Source of Truth:** Gold Delta Lake (SQL is disposable projection)
+**Architecture:** FastAPI queries Gold Delta Lake directly via DuckDB  
+**Performance:** 10-50ms (direct Delta queries), 3-10ms (cached)  
+**Update Frequency:** Real-time (queries canonical Gold Delta, zero sync lag)  
+**Source of Truth:** Gold Delta Lake (single source of truth)
 
 #### Get Herd Composition
 
 **Endpoint:** `GET /api/v1/analytics/herd-composition`
 
-**Description:** Get herd composition breakdown by breed, status, and sex from analytics schema.
+**Description:** Get herd composition breakdown by breed, status, and sex. DuckDB queries Gold Delta tables directly.
 
 **Query Parameters:**
 - `tenant_id` (required, UUID): Tenant identifier
@@ -298,9 +298,9 @@ curl "http://localhost:8000/api/v1/analytics/herd-composition?tenant_id=550e8400
 - `400 Bad Request`: Invalid date format
 
 **Performance:**
-- Uncached query: 21-76ms
-- Cached query (5s TTL): 3-39ms
-- Memory usage: 84MB total (FastAPI process)
+- Direct DuckDB query: 10-50ms
+- Cached query (5s TTL): 3-10ms
+- Memory usage: ~100MB (FastAPI + DuckDB)
 
 ---
 

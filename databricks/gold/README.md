@@ -1,6 +1,6 @@
 ## Gold Layer - Pre-Computed Analytics
 
-The **Gold layer** contains business-ready aggregations and analytics computed from Silver. This is the final layer in the medallion architecture optimized for BI tools, dashboards, and **fast API queries via SQL Server projection**.
+The **Gold layer** contains business-ready aggregations and analytics computed from Silver. This is the final layer in the medallion architecture optimized for BI tools, dashboards, and **fast API queries via DuckDB**.
 
 ### Key Principles
 
@@ -9,7 +9,7 @@ The **Gold layer** contains business-ready aggregations and analytics computed f
 ✅ **Deterministic**: Same Silver → Same Gold (always)  
 ✅ **Includes Lineage**: Full traceability to Silver sources  
 ✅ **BI-Optimized**: Pre-aggregated for fast query performance  
-✅ **SQL Projection**: Automatically projected to SQL Server analytics schema for FastAPI
+✅ **DuckDB Analytics**: Direct queries to Gold Delta tables (mirrors Databricks SQL pattern)
 
 ---
 
@@ -33,37 +33,37 @@ Gold Layer (Business Analytics - Delta Lake)
   └─ weight_trends (planned)
        ↓
     ┌──────────────────────────────────┐
-    │  SQL Server Projection           │
-    │  (Disposable, Rebuilt from Gold) │
+    │  DuckDB Analytics Engine         │
+    │  (Direct Delta queries)          │
     └──────────────────────────────────┘
        ↓
-SQL Server analytics.* schema (Fast API queries)
-  ├─ analytics.herd_composition
-  ├─ analytics.cow_lifecycle
-  └─ analytics.daily_snapshots
+FastAPI Analytics Endpoints (10-50ms)
+  ├─ GET /analytics/herd-composition
+  ├─ GET /analytics/cow/:id (lifecycle)
+  └─ GET /analytics/daily-snapshots
        ↓
-FastAPI (SQLAlchemy queries <100ms)
+DuckDB delta_scan('s3://gold/*')
 ```
 
-### SQL Server Projection
+### DuckDB Analytics
 
-**What:** Gold Delta tables are automatically projected to SQL Server analytics schema  
-**Why:** Enable fast (<100ms) API queries without heavyweight Spark sessions  
-**How:** Unified Gold runner writes to both Delta Lake AND SQL Server via JDBC  
-**When:** Every 10 seconds (sync-analytics.sh service)
+**What:** DuckDB queries Gold Delta tables directly via delta_scan()  
+**Why:** Enable fast (10-50ms) API queries without SQL projection overhead  
+**How:** FastAPI uses DuckDB with Delta extension to query MinIO S3 directly  
+**When:** Real-time (queries canonical source, zero sync lag)
 
 **Key Benefits:**
-- 99% faster API queries (21-76ms vs 2-10 seconds with Spark)
-- 95% less memory (84MB vs 500MB-2GB)
-- No JVM startup overhead
-- Standard SQLAlchemy patterns
-- Connection pooling
-- Horizontal scaling via SQL Server read replicas
+- Direct Gold Delta queries (10-50ms response time)
+- Zero sync lag (queries canonical source directly)
+- No projection maintenance overhead
+- Mirrors Databricks SQL serverless warehouses pattern
+- In-memory analytics engine with columnar processing
+- Standard Python DuckDB library
 
 **Architecture Principle:**
 ```
-Gold Delta Lake = Canonical Analytical Truth (never deleted, authoritative)
-SQL Server analytics.* = Disposable Projection (can rebuild from Gold anytime)
+Gold Delta Lake = Single Source of Truth (canonical, authoritative)
+DuckDB = Direct Query Engine (no intermediate projection needed)
 ```
 
 ---
@@ -114,20 +114,19 @@ python databricks/gold/gold_herd_composition.py --days 7
 
 **Query via FastAPI:**
 ```bash
-# Query from SQL Server analytics schema (fast!)
+# DuckDB queries Gold Delta directly
 curl "http://localhost:8000/api/v1/analytics/herd-composition?tenant_id=550e8400-e29b-41d4-a716-446655440000"
 
-# Response time: 21-76ms (uncached), 3-39ms (cached)
+# Response time: 10-50ms (DuckDB delta_scan), 3-10ms (cached)
 # {
-#   "as_of": "2026-01-28T06:09:05.669752",
+#   "as_of": "2026-02-21T06:09:05.669752",
 #   "cached": false,
 #   "data": {
-#     "snapshot_date": "2026-01-28",
+#     "snapshot_date": "2026-02-21",
 #     "total_cows": 7,
 #     "by_breed": [...],
 #     "by_status": [...],
 #     "by_sex": [...]
-#   }
 # }
 ```
 
